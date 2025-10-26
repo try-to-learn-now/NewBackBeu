@@ -1,7 +1,7 @@
 {
-  "name": "beu-scraper",
+  "name": "beu-result-api",
   "version": "1.0.0",
-  "description": "Vercel API to fetch BEU Bihar results",
+  "description": "Vercel API to fetch BEU Bihar results for a range",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -17,6 +17,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "node-fetch": "^3.3.0"
+    "node-fetch": "^3.3.2"
   }
 }
