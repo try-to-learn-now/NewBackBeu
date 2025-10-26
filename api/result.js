@@ -1,105 +1,114 @@
-// /api/get-range-results.js
-import fetch from 'node-fetch'; // Or use built-in fetch if Node v18+
+// /api/result.js
+import fetch from 'node-fetch';
 
-// --- Hardcoded parameters based on your example ---
-const YEAR = '2024';
-const SEMESTER = 'V';
-const EXAM_HELD = 'July/2025'; // Will be URL encoded
-const PREFIX_LENGTH = 8; // Define how long the actual prefix is (e.g., 22104134 has 8 digits)
+// --- Configuration ---
+const YEAR = '2024'; // Exam Year
+const SEMESTER = 'V'; // Semester Code
+const EXAM_HELD = 'July/2025'; // Exam Held Month/Year
+const PREFIX_LENGTH = 8; // Length of the registration number prefix (e.g., 22104134)
+const FETCH_TIMEOUT = 8000; // Timeout for each API request in milliseconds (8 seconds)
 // --- ---
 
-// --- Function to fetch a single result (same as before) ---
+// --- Helper: Fetch Single Result ---
 async function fetchSingleResult(regNo) {
     const encodedExamHeld = encodeURIComponent(EXAM_HELD);
     const targetUrl = `https://beu-bih.ac.in/backend/v1/result/get-result?year=${YEAR}&redg_no=${regNo}&semester=${SEMESTER}&exam_held=${encodedExamHeld}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
 
     try {
         const apiResponse = await fetch(targetUrl, {
+            signal: controller.signal, // Use AbortController for timeout
             headers: {
                 'Accept': 'application/json, text/plain, */*',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Referer': `https://beu-bih.ac.in/result-two/some-exam-name?semester=${SEMESTER}&session=${YEAR}&exam_held=${encodedExamHeld}`
-            },
-             signal: AbortSignal.timeout(8000) // 8 second timeout per request
+                'Referer': `https://beu-bih.ac.in/result-two/B.Tech.%205th%20Semester%20Examination%2C%202024?semester=${SEMESTER}&session=${YEAR}&exam_held=${encodedExamHeld}`
+            }
         });
 
+        clearTimeout(timeoutId); // Clear timeout if fetch completes
+
         if (!apiResponse.ok) {
-            console.warn(`API fetch failed for ${regNo}: ${apiResponse.status} ${apiResponse.statusText}`);
-            return { status: 'failed', regNo: regNo, reason: `HTTP ${apiResponse.status}` };
+            console.warn(`[${regNo}] API fetch failed: ${apiResponse.status} ${apiResponse.statusText}`);
+            return { status: 'failed', regNo, reason: `HTTP ${apiResponse.status}` };
         }
 
         const jsonData = await apiResponse.json();
 
         if (jsonData.status !== 200 || !jsonData.data) {
-            console.warn(`API returned non-success or no data for ${regNo}: ${jsonData.message}`);
-            return { status: 'failed', regNo: regNo, reason: jsonData.message || `API Status ${jsonData.status}` };
+            console.warn(`[${regNo}] API returned no data: ${jsonData.message || `Status ${jsonData.status}`}`);
+            return { status: 'failed', regNo, reason: jsonData.message || `API Status ${jsonData.status}` };
         }
 
-        return { status: 'success', regNo: regNo, data: jsonData.data };
+        return { status: 'success', regNo, data: jsonData.data };
 
     } catch (error) {
-        console.error(`Error fetching ${regNo}:`, error.name === 'TimeoutError' ? 'Request Timed Out' : error.message);
-        return { status: 'error', regNo: regNo, reason: error.name === 'TimeoutError' ? 'Request Timed Out' : 'Fetch Error' };
+        clearTimeout(timeoutId); // Clear timeout if fetch fails
+        if (error.name === 'AbortError') {
+             console.error(`[${regNo}] Error: Request Timed Out after ${FETCH_TIMEOUT}ms`);
+            return { status: 'error', regNo, reason: 'Request Timed Out' };
+        } else {
+            console.error(`[${regNo}] Error fetching: ${error.message}`);
+            return { status: 'error', regNo, reason: 'Fetch Error' };
+        }
     }
 }
 
-// --- Main API Handler ---
+// --- Main Vercel API Handler ---
 export default async function handler(req, res) {
-    // --- Get the FULL 11-digit registration number from the 'prefix' query param ---
-    const fullRegNo = req.query.prefix; // Using 'prefix' as the parameter name as requested
+    const fullRegNo = req.query.prefix; // Parameter name requested by user
 
-    // --- Input Validation ---
-    if (!fullRegNo || !/^\d{11}$/.test(fullRegNo)) { // Check if it's exactly 11 digits
+    if (!fullRegNo || !/^\d{11}$/.test(fullRegNo)) {
         return res.status(400).json({
-            error: 'Missing or invalid parameter. Please provide a full 11-digit registration number using the "prefix" query parameter.',
+            error: 'Invalid parameter. Use "prefix" query parameter with a full 11-digit registration number.',
             example: '?prefix=22104134010'
         });
     }
 
-    // --- Extract the actual prefix ---
-    const actualPrefix = fullRegNo.substring(0, PREFIX_LENGTH); // Takes the first 8 digits
-
-    // --- Generate the list of registration numbers based on the extracted prefix ---
+    const actualPrefix = fullRegNo.substring(0, PREFIX_LENGTH);
     const registrationNumbers = [];
-    // Range 1: 010 to 060
+
+    // Generate numbers 010 to 060
     for (let i = 10; i <= 60; i++) {
-        const suffix = i.toString().padStart(3, '0');
-        registrationNumbers.push(`${actualPrefix}${suffix}`);
+        registrationNumbers.push(`${actualPrefix}${i.toString().padStart(3, '0')}`);
     }
-    // Range 2: 901 to 960
+    // Generate numbers 901 to 960
     for (let i = 901; i <= 960; i++) {
         registrationNumbers.push(`${actualPrefix}${i}`);
     }
 
-    console.log(`Attempting to fetch results for ${registrationNumbers.length} numbers with extracted prefix ${actualPrefix}...`);
+    console.log(`[Handler] Attempting fetch for ${registrationNumbers.length} reg numbers with prefix ${actualPrefix}.`);
 
     try {
-        // --- Fetch all results in parallel ---
         const results = await Promise.allSettled(
             registrationNumbers.map(regNo => fetchSingleResult(regNo))
         );
 
-        // --- Filter out only the successful results ---
         const successfulResults = results
             .filter(result => result.status === 'fulfilled' && result.value.status === 'success')
-            .map(result => result.value.data); // Extract only the 'data' part
+            .map(result => result.value.data);
 
-        console.log(`Successfully fetched ${successfulResults.length} results out of ${registrationNumbers.length} for extracted prefix ${actualPrefix}.`);
+        const failedCount = results.length - successfulResults.length;
 
-        // --- Send Response ---
-        res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=1800'); // Cache for 1 hour
+        console.log(`[Handler] Fetched ${successfulResults.length} results successfully, ${failedCount} failed/not found.`);
+
+        // Set cache header for Vercel Edge Network
+        res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=1800'); // Cache 1 hour, stale 30 mins
+
         res.status(200).json({
-            count: successfulResults.length,
+            count_success: successfulResults.length,
+            count_failed_or_missing: failedCount,
             total_attempted: registrationNumbers.length,
-            extracted_prefix: actualPrefix, // Show which prefix was used
+            extracted_prefix: actualPrefix,
             exam_details: { year: YEAR, semester: SEMESTER, held: EXAM_HELD },
-            results: successfulResults // Array of result objects
+            results: successfulResults // Array of result objects (only successful ones)
         });
 
     } catch (error) {
-        console.error(`General error processing range for extracted prefix ${actualPrefix}:`, error);
+        // Catch unexpected errors in the main handler logic (less likely with Promise.allSettled)
+        console.error(`[Handler] Unexpected error for prefix ${actualPrefix}:`, error);
         res.status(500).json({
-            error: 'An unexpected error occurred while processing the range.',
+            error: 'An unexpected server error occurred.',
             details: error.message
         });
     }
