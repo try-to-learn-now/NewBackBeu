@@ -1,7 +1,7 @@
 {
-  "name": "beu-result-api",
+  "name": "beu-result-batch-fetcher",
   "version": "1.0.0",
-  "description": "Vercel API to fetch BEU Bihar results for a range",
+  "description": "Vercel API to fetch small batches of BEU results using backend API",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -12,7 +12,8 @@
     "bihar",
     "result",
     "api",
-    "vercel"
+    "vercel",
+    "batch"
   ],
   "author": "",
   "license": "ISC",
